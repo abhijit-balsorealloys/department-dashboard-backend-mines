@@ -1,67 +1,45 @@
+const mysql = require('mysql2/promise');
 
-const mysql = require('mysql2');
-const sql = require('mssql');
-
-// SQL Server (MSSQL) config
-const mssqlConfig = {
-  user: "sa",
-  password: 'sa#1234*',
-  server: '80.9.2.75',
-  database: 'SmartFace',
-  port: 1433,
-   options: {
-    encrypt: false,
-    enableArithAbort: true,
-    trustServerCertificate: true
-  },
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000
-  }
-};
-
-// MySQL config
-const mysqlPool = mysql.createPool({
-  host: "80.9.2.78",
-  user: "corpappdb",
-  password: "Bal@12345",
-  database: "balcorpdb",
+const db = mysql.createPool({
+  host: '192.168.3.62',
+  user: 'corpappdb',
+  password: 'Bal@12345',
+  database: 'balcorpdb',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
 });
 
-//Connect to SQL Server
-async function connectToMSSQL() {
-  try {
-    await sql.connect(mssqlConfig);
-    console.log('✅ Connected to SQL Server');
-  } catch (err) {
-    console.error('❌ SQL Server Connection Error:', err);
-  }
+const db1 = mysql.createPool({
+  host: '80.9.2.78',
+  user: 'corpappdb',
+  password: 'Bal@12345',
+  database: 'balpms',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+
+async function testConnections() {
+  try {
+    const conn1 = await db.getConnection();
+    console.log('Connected to MySQL balcorpdb database.');
+    conn1.release();
+  } catch (err) {
+    console.error('Error connecting to MySQL balcorpdb:', err);
+  }
+
+  try {
+    const conn2 = await db1.getConnection();
+    console.log('Connected to MySQL balpms database.');
+    conn2.release();
+  } catch (err) {
+    console.error('Error connecting to MySQL balpms:', err);
+  }
 }
-const poolPromise = new sql.ConnectionPool(mssqlConfig)
-  .connect()
-  .then(pool => {
-    console.log('✅ MSSQL pool connected');
-    return pool;
-  })
-  .catch(err => {
-    console.error('❌ MSSQL pool connection failed', err);
-    throw err;
-  });
 
-
-// Connect to MySQL
-mysqlPool.getConnection((err) => {
-  if (err) {
-    console.error("❌ MySQL Connection Error:", err);
-  } else {
-    console.log("✅ Connected to MySQL database.");
-  }
-});
-
-// Export connections
 module.exports = {
-  mysqlConnection: mysqlPool,
-   poolPromise,
-  mssql: sql
+  primaryConnection: db,
+  secondaryConnection: db1,
 };
+
