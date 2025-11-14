@@ -15,7 +15,6 @@ function hashPassword(password) {
 
 // Small helper to run queries (handles CALL result shapes)
 async function dbQuery(sql, params = []) {
-  // Returns rows (array) or [] on no results
   const [results] = await primaryConnection.query(sql, params);
   // For CALL stored procs, results is often an array whose first element is the rows
   if (Array.isArray(results) && results.length > 0 && Array.isArray(results[0])) {
@@ -29,7 +28,9 @@ async function dbQuery(sql, params = []) {
 async function getUserPassword(userid) {
   const rows = await dbQuery("SELECT password FROM balcorpdb.mines_users_access WHERE UserId = ?", [userid]);
   if (rows && rows.length > 0) {
-    return rows[0].password;
+    // DB column is USER_PWD — return that
+    // normalize to string for safe comparisons
+    return rows[0].USER_PWD ? String(rows[0].USER_PWD) : null;
   }
   return null;
 }
@@ -39,6 +40,7 @@ async function checkPassword(userid, inputPassword) {
   const inputHash = hashPassword(inputPassword);
   const storedPassword = await getUserPassword(userid);
   if (!storedPassword) return false;
+  // case-insensitive compare (hex may be uppercase/lowercase in DB)
   return storedPassword.toLowerCase() === inputHash.toLowerCase();
 }
 
@@ -49,7 +51,7 @@ async function checkPassword(userid, inputPassword) {
 // GET all users (example)
 router.get("/", async (req, res) => {
   try {
-    const results = await dbQuery("SELECT * FROM balcorpdb.mines_users");
+    const results = await dbQuery("SELECT * FROM balcorpdb.sap_employee_details");
     res.json(results);
   } catch (err) {
     console.error("Error fetching mines_users:", err);
@@ -72,24 +74,32 @@ router.post("/adminlogin", async (req, res) => {
 
     const inputHash = hashPassword(password);
 
-    // Call stored procedure - using dbQuery helper
-    const results = await primaryConnection.query("CALL balcorpdb.SP_MINES_ADMIN_USER_GET(?, ?)", [userid, inputHash]);
-    // primaryConnection.query returns [results, fields]
-    const raw = results[0];
-    const firstResultset = Array.isArray(raw) ? raw : results;
-    const userRow = Array.isArray(firstResultset) && firstResultset.length > 0 ? firstResultset[0] : null;
+    // Use dbQuery helper for consistent result-shape handling
+    const procRows = await dbQuery("CALL balcorpdb.SP_MINES_VALIDATE_USER(?, ?)", [userid, inputHash]);
+
+    // procRows should be an array of row objects if the proc returns rows
+    const userRow = Array.isArray(procRows) && procRows.length > 0 ? procRows[0] : null;
 
     if (!userRow) {
       return res.status(404).json({ error: "User data not found" });
     }
 
-    delete userRow.password;
+    // If stored user field is USER_PWD remove it before sending response
+    if (userRow.USER_PWD) {
+      delete userRow.USER_PWD;
+    }
+    // also remove common alternative property name if present
+    if (userRow.password) {
+      delete userRow.password;
+    }
+
     return res.json({ user: userRow });
   } catch (err) {
     console.error("Error in /adminlogin:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // Show All Location Wise Data
 router.get("/showLocation", async (req, res) => {
