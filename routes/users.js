@@ -149,7 +149,6 @@ router.get("/showPlan", async (req, res) => {
   }
 });
 
-module.exports = router;
 
 // Geology Face Sampling
 //Insert Geology Face Sampling
@@ -204,7 +203,6 @@ router.get("/geology-face-analysis/show", async (req, res) => {
   }
 });
 
-module.exports = router;
 
 // Mines Opearations
 //show Varient Types
@@ -219,8 +217,6 @@ router.get("/showVariant", async (req, res) => {
   }
 });
 
-module.exports = router;
-
 // show Agency Types
 router.get("/showAgency", async (req, res) => {
   try {
@@ -232,7 +228,6 @@ router.get("/showAgency", async (req, res) => {
     return res.status(500).json({ error: err.message || "Internal Server Error" });
   }
 });
-module.exports = router;
 
 //Insert Mines Daywise Excavation
 const uploadExcavation = multer();
@@ -291,8 +286,6 @@ router.get("/mines-daywise-excavation/show", async (req, res) => {
   }
 });
 
-module.exports = router;
-
 //Mines Daywise ROM Entry
 //Insert Mines Daywise ROM Entry
 const uploadRomEntry = multer();
@@ -347,8 +340,6 @@ router.get("/mines-daywise-rom-entry/show", async (req, res) => {
     res.status(500).json({ error: err.message || "Internal Server Error" });
   }
 });
-module.exports = router; 
-
 
 //COB Production & Dispatch
 // Insert / Update COBP Production
@@ -429,8 +420,6 @@ router.get("/cobp-production/show", async (req, res) => {
     res.status(500).json({ error: err.message || "Internal Server Error" });
   }
 });
-module.exports = router;
-
 
 //COBP Sample Analysis
 // INSERT / UPDATE COBP Sample Analysis
@@ -460,8 +449,6 @@ router.post("/cobp-analysis", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-module.exports = router;
-
 // GET COBP Sample Analysis — Fetch all records
 router.get("/cobp-analysis/show", async (req, res) => {
   try {
@@ -506,8 +493,6 @@ router.get("/showVehicleType", async (req, res) => {
     return res.status(500).json({ error: err.message || "Internal Server Error" });
   }
 });
-module.exports = router;
-
 //Insert/Update Equipment Engagement
 const uploadEquipEngage = multer();
 
