@@ -12,7 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 const PORT = 3018;
 
 app.use(cors({
-  origin: ['http://localhost:3017','http://80.9.2.78:3017'], 
+  origin: ['http://localhost:3000','http://80.9.2.78:3017'], 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
