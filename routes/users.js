@@ -26,14 +26,7 @@ async function dbQuery(sql, params = []) {
 
 // Helper function to get user password from database
 async function getUserPassword(userid) {
-<<<<<<< HEAD
-  const rows = await dbQuery(
-    "SELECT USER_PWD FROM balcorpdb.intranet_user_login WHERE EMPID = ?",
-    [userid]
-  );
-=======
   const rows = await dbQuery("SELECT password FROM balcorpdb.mines_users_access WHERE UserId = ?", [userid]);
->>>>>>> origin/main
   if (rows && rows.length > 0) {
     // DB column is USER_PWD — return that
     // normalize to string for safe comparisons
@@ -141,20 +134,6 @@ router.post("/daily-excavation", uploadEx.none(), async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-<<<<<<< HEAD
-// Show All Location Wise Data
-router.get("/showLocation", async (req, res) => {
-  try {
-    const [results] = await primaryConnection.query("CALL balcorpdb.SP_MINES_LOCATION_SHOW()");
-    // results may be [rows, ...] or rows; pick rows if nested
-    const rows = Array.isArray(results) && Array.isArray(results[0]) ? results[0] : results;
-    return res.json(rows);
-  } catch (err) {
-    console.error("Error in /showLocation:", err);
-    return res.status(500).json({ error: err.message || "Internal Server Error" });
-  }
-});
-=======
 
 
 //get Daily Excavation Plans
@@ -564,7 +543,6 @@ router.get("/equipment-engagement/show", async (req, res) => {
   } 
 });
 
->>>>>>> origin/main
 // Submit HR Dashboard Form
 const uploadHR = multer();
 router.post("/hr-dashboard", uploadHR.none(), async (req, res) => {
