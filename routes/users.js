@@ -26,7 +26,7 @@ async function dbQuery(sql, params = []) {
 
 // Helper function to get user password from database
 async function getUserPassword(userid) {
-  const rows = await dbQuery("SELECT password FROM balcorpdb.mines_users_access WHERE UserId = ?", [userid]);
+  const rows = await dbQuery("SELECT USER_PWD FROM balcorpdb.intranet_user_login WHERE EMPID = ?", [userid]);
   if (rows && rows.length > 0) {
     // DB column is USER_PWD — return that
     // normalize to string for safe comparisons
@@ -51,7 +51,7 @@ async function checkPassword(userid, inputPassword) {
 // GET all users (example)
 router.get("/", async (req, res) => {
   try {
-    const results = await dbQuery("SELECT * FROM balcorpdb.sap_employee_details");
+    const results = await dbQuery("SELECT * FROM balcorpdb.intranet_user_login");
     res.json(results);
   } catch (err) {
     console.error("Error fetching mines_users:", err);
@@ -117,11 +117,11 @@ router.get("/showLocation", async (req, res) => {
 const uploadEx = multer();
 router.post("/daily-excavation", uploadEx.none(), async (req, res) => {
   try {
-    const { Prod_date, Shift, Loc_Id, Face_Desc, OB_QTY_Cum, ORE_QTY, HG_QTY, MG_QTY, LG_QTY } = req.body;
+    const { Prod_date, Shift, Loc_Id, Face_Desc, OB_QTY_Cum, ORE_QTY, HG_QTY, MG_QTY, LG_QTY, userId } = req.body;
 
     const [results] = await primaryConnection.query(
       "CALL balcorpdb.SP_MINES_DAILY_EXCAVATION_PLAN_INSERT(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [Prod_date, Shift, Loc_Id, Face_Desc, OB_QTY_Cum, ORE_QTY, HG_QTY, MG_QTY, LG_QTY, 3081]
+      [Prod_date, Shift, Loc_Id, Face_Desc, OB_QTY_Cum, ORE_QTY, HG_QTY, MG_QTY, LG_QTY, userId]
     );
 
     return res.status(200).json({
@@ -155,7 +155,7 @@ router.get("/showPlan", async (req, res) => {
 const uploadGeo = multer();
 router.post("/geology-face-analysis", uploadGeo.none(), async (req, res) => {
   try {
-    const { Prod_date, Shift, LAB_ID, Loc_Id, SAMPLE_ID, Cr2O3, FeO, Ratio } = req.body;
+    const { Prod_date, Shift, LAB_ID, Loc_Id, SAMPLE_ID, Cr2O3, FeO, Ratio, Analysis_Name, userId } = req.body;
 
     const [existing] = await primaryConnection.query(
       `SELECT * FROM balcorpdb.mines_geology_face_sample_analysis
@@ -170,8 +170,8 @@ router.post("/geology-face-analysis", uploadGeo.none(), async (req, res) => {
     }
 
     const [results] = await primaryConnection.query(
-      "CALL balcorpdb.SP_MINES_GEOLOGY_FACE_SAMPLING_ANALYSIS_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [Prod_date, Shift, LAB_ID, Loc_Id, SAMPLE_ID, Cr2O3, FeO, Ratio, 3081]
+      "CALL balcorpdb.SP_MINES_GEOLOGY_FACE_SAMPLING_ANALYSIS_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [Prod_date, Shift, LAB_ID, Loc_Id, SAMPLE_ID, Cr2O3, FeO, Ratio, Analysis_Name, userId]
     );
 
     res.status(200).json({
@@ -228,13 +228,50 @@ router.get("/showAgency", async (req, res) => {
     return res.status(500).json({ error: err.message || "Internal Server Error" });
   }
 });
+// Monthly Excavation Plan
+const uploadMonthyOre = multer();
+router.post("/monthly-excavation-plan", uploadMonthyOre.none(), async (req, res) => {
+  try {
+    const {Prod_Month,Shift,Loc_Id,Mode,Z_Range,Grade,Tonnage,Cr2O3_Percentage,CrFe_Ratio,Remarks,UserId 
+    } = req.body;
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_MONTHLY_EXCAVATION_PLAN_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [Prod_Month, Shift, Loc_Id, Mode, Z_Range, Grade, Tonnage, Cr2O3_Percentage, CrFe_Ratio,Remarks, UserId]
+    );
+
+    return res.status(200).json({
+      status: "success",
+      message: "Monthly Excavation (ORE) submitted successfully!",
+      data: results[0]
+    });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Monthly ORE
+router.get("/monthly-excavation-plan/show", async (req, res) => {
+ try {
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_MONTHLY_EXCAVATION_PLAN_GET()"
+    );
+    const rows = Array.isArray(results) && Array.isArray(results[0]) ? results[0] : results;
+    return res.json(rows);
+  } catch (err) {
+    console.error("Error in fetching Monthly Excavation Plan records:", err);
+    return res.status(500).json({ error: err.message || "Internal Server Error" });
+  }
+});
 
 //Insert Mines Daywise Excavation
 const uploadExcavation = multer();
 
 router.post("/mines-daywise-excavation", uploadExcavation.none(), async (req, res) => {
   try {
-    const { Prod_date, Shift, Loc_Id, Variant, Agency, No_Of_trips, Qty } = req.body;
+    const { Prod_date, Shift, Loc_Id, Variant, Agency, No_Of_trips, Qty, UserId } = req.body;
+    console.log(UserId);
 
     const [existing] = await primaryConnection.query(
       `SELECT * FROM balcorpdb.mines_day_wise_excavation
@@ -243,22 +280,14 @@ router.post("/mines-daywise-excavation", uploadExcavation.none(), async (req, re
     );
 
     if (existing.length > 0) {
-      await primaryConnection.query(
-        `UPDATE balcorpdb.mines_day_wise_excavation
-         SET No_Of_trips = ?, Qty = ?, Entry_Id = ?, Entry_Date = NOW()
-         WHERE Prod_date = ? AND Shift = ? AND Loc_Id = ? AND Variant = ? AND Agency = ?`,
-        [No_Of_trips, Qty, 3081, Prod_date, Shift, Loc_Id, Variant, Agency]
-      );
-
-      return res.status(200).json({
-        status: "success",
-        message: "Record updated successfully!",
-      });
+       console.log("Updating existing Day Wise Mines excavation record:", existing[0]);
+    } else {
+      console.log("Inserting new Day Wise Mines excavation record...");
     }
 
     const [results] = await primaryConnection.query(
       "CALL balcorpdb.SP_MINES_DAY_WISE_EXCAVATION_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?)",
-      [Prod_date, Shift, Loc_Id, Variant, Agency, No_Of_trips, Qty, 3081]
+      [Prod_date, Shift, Loc_Id, Variant, Agency, No_Of_trips, Qty, UserId]
     );
 
     return res.status(200).json({
@@ -271,7 +300,6 @@ router.post("/mines-daywise-excavation", uploadExcavation.none(), async (req, re
     res.status(500).json({ error: err.message });
   }
 });
-
 router.get("/mines-daywise-excavation/show", async (req, res) => {
   try {
     const [results] = await primaryConnection.query(
@@ -292,11 +320,11 @@ const uploadRomEntry = multer();
 
 router.post("/mines-daywise-rom-entry", uploadRomEntry.none(), async (req, res) => {
   try {
-    const { Prod_date, Shift, Loc_Id, Variant, No_Of_trips, Stack_no, Qty } = req.body;
+    const { Prod_date, Shift, Loc_Id, Variant, No_Of_trips, Stack_no, Qty, UserId } = req.body;
 
     const [results] = await primaryConnection.query(
       "CALL balcorpdb.SP_MINES_DAY_WISE_ROM_ENTRY_INSERT(?, ?, ?, ?, ?, ?, ?, ?)",
-      [Prod_date, Shift, Loc_Id, Variant, No_Of_trips, Stack_no, Qty, 3081] 
+      [Prod_date, Shift, Loc_Id, Variant, No_Of_trips, Stack_no, Qty, UserId] 
     );
 
     return res.status(200).json({
@@ -345,53 +373,36 @@ router.get("/mines-daywise-rom-entry/show", async (req, res) => {
 // Insert / Update COBP Production
 const uploadCobpProduction = multer();
 
-
-router.post("/cobp-production", async (req, res) => {
+router.post("/cobp-production", uploadCobpProduction.none(), async (req, res) => {
   try {
-    console.log("Incoming COBP body:", req.body);
-
     const {
       Prod_date,
-      Shift,
-      Loc_Id,
       Variant,
+      Ore_Type,
       No_Of_trips,
       Stack_no,
       Qty,
       Cr2O3,
       FeO,
       Ratio,
+      Analysis_Name,
+      userId
     } = req.body;
 
-    // Type conversion & trimming
-    const ProdDate = Prod_date.trim();
-    const ShiftChar = Shift.trim().charAt(0);
-    const VariantVal = Variant.trim();
-    const LocId = Number(Loc_Id);
-    const StackNo = Number(Stack_no);
-    const NoOfTrips = Number(No_Of_trips);
-    const QtyVal = Number(Qty);
-    const Cr2O3Val = Number(Cr2O3);
-    const FeOVal = Number(FeO);
-    const RatioVal = Number(Ratio);
-
-    console.log("SP payload:", {
-      ProdDate,
-      ShiftChar,
-      LocId,
-      VariantVal,
-      NoOfTrips,
-      StackNo,
-      QtyVal,
-      Cr2O3Val,
-      FeOVal,
-      RatioVal,
-      fixedParam: 3081,
-    });
 
     const [results] = await primaryConnection.query(
       "CALL balcorpdb.SP_MINES_COB_PRODUCTION_DESPATCH_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [ProdDate, ShiftChar, LocId, VariantVal, NoOfTrips, StackNo, QtyVal, Cr2O3Val, FeOVal, RatioVal, 3081]
+      [Prod_date,
+      Variant,
+      Ore_Type,
+      No_Of_trips,
+      Stack_no,
+      Qty,
+      Cr2O3,
+      FeO,
+      Ratio, 
+      Analysis_Name,
+      userId]
     );
 
     console.log("SP results:", results);
@@ -411,7 +422,7 @@ router.post("/cobp-production", async (req, res) => {
 router.get("/cobp-production/show", async (req, res) => {
   try {
     const [results] = await primaryConnection.query(
-      "CALL balcorpdb.SP_COBP_PRODUCTION_GET()"
+      "CALL balcorpdb.SP_MINES_COB_PRODUCTION_DESPATCH_GET()"
     );
     const rows = Array.isArray(results) && Array.isArray(results[0]) ? results[0] : results;
     res.json(rows);
@@ -423,19 +434,15 @@ router.get("/cobp-production/show", async (req, res) => {
 
 //COBP Sample Analysis
 // INSERT / UPDATE COBP Sample Analysis
-router.post("/cobp-analysis", async (req, res) => {
+const uploadCobAnalysis = multer();
+router.post("/cobp-analysis",  uploadCobAnalysis.none(), async (req, res) => {
   try {
-    console.log("Incoming JSON:", req.body);  // Debug
+    const { Prod_date, Shift, Sampling_Type, No_Of_trips, Qty, Cr2O3, FeO, Ratio, Analysis_Name, UserId } = req.body;
 
-    const { Prod_date, Shift, Sampling_Type, Qty, Characteristics, Value } = req.body;
-
-    if (!Prod_date || !Shift || !Sampling_Type || !Qty || !Characteristics || !Value) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
 
     const [results] = await primaryConnection.query(
-      "CALL balcorpdb.SP_MINES_COBP_SAMPLE_ANALYSIS_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?)",
-      [Prod_date, Shift, Sampling_Type, Qty, Characteristics, Value, 3081]
+      "CALL balcorpdb.SP_MINES_COBP_SAMPLE_ANALYSIS_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [Prod_date, Shift, Sampling_Type, No_Of_trips, Qty, Cr2O3, FeO, Ratio, Analysis_Name, UserId ]
     );
 
     return res.status(200).json({
@@ -498,10 +505,10 @@ const uploadEquipEngage = multer();
 
 router.post("/equipment-engagement", uploadEquipEngage.none(), async (req, res) => {
   try {
-    const { Prod_date, Shift, Loc_Id, Vehicle_Type, Plan_No_of_Ex_and_other_Eq_Engaged, Actual_No_of_Eq_Engaged, Engaged_Equipment_Name, Vehicle_Id, Owner_Name, Vehicle_Desc } = req.body;
+    const { Prod_date, Shift, Loc_Id, Vehicle_Type, Plan_No_of_Ex_and_other_Eq_Engaged, Actual_No_of_Eq_Engaged, Engaged_Equipment_Name, Vehicle_Id,  Vehicle_Desc, Owner_Name, UserId } = req.body;
     const [results] = await primaryConnection.query(
       "CALL balcorpdb.SP_MINES_EQUIPMENT_ENGAGEMENTS_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [Prod_date, Shift, Loc_Id, Vehicle_Type, Plan_No_of_Ex_and_other_Eq_Engaged, Actual_No_of_Eq_Engaged, Engaged_Equipment_Name, Vehicle_Id, Owner_Name, Vehicle_Desc, 3081]
+      [Prod_date, Shift, Loc_Id, Vehicle_Type, Plan_No_of_Ex_and_other_Eq_Engaged, Actual_No_of_Eq_Engaged, Engaged_Equipment_Name, Vehicle_Id, Vehicle_Desc, Owner_Name, UserId]
     );
     return res.status(200).json({
       status: "success",
