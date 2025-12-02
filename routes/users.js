@@ -534,6 +534,102 @@ router.get("/equipment-engagement/show", async (req, res) => {
     return res.status(500).json({ error: err.message || "Internal Server Error" });
   } 
 });
+const uploadEquipStatus = multer();
+router.post("/equipment-status", uploadEquipStatus.none(), async (req, res) => {
+  try {
+    const { Prod_date, Planned_Maintenance, Operating_Hours_on_previous_day, Output_for_the_day_Trips, Breakdown_Start, Total_Breakdown, Availability_of_equipment, Hours_utilized_for_Ore_excavation, Hours_utilized_for_OB_excavation, Idle, Utilization, Breakdown_details, Mitigation_Plan_for_Breakdown, UserId } = req.body;    
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_EQUIPMENT_STATUS_AUTOMOBILE_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [Prod_date, Planned_Maintenance, Operating_Hours_on_previous_day, Output_for_the_day_Trips, Breakdown_Start, Total_Breakdown, Availability_of_equipment, Hours_utilized_for_Ore_excavation, Hours_utilized_for_OB_excavation, Idle, Utilization, Breakdown_details, Mitigation_Plan_for_Breakdown, UserId]  
+    );
+    return res.status(200).json({
+      status: "success",
+      message: "Equipment Status data Submitted successfully!",
+      data: results[0],
+    });
+  } catch (err) {
+    console.error("Server error (Equipment Status Insert):", err);
+    res.status(500).json({ error: err.message });
+  } 
+});
+
+// GET: Fetch Equipment Status records
+router.get("/equipment-status/show", async (req, res) => {
+  try {
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_EQUIPMENT_STATUS_AUTOMOBILE_GET()"
+    );
+    const rows = Array.isArray(results) && Array.isArray(results[0]) ? results[0] : results;
+    return res.json(rows);
+  } catch (err) {
+    console.error("Error in fetching Equipment Status records:", err);
+    return res.status(500).json({ error: err.message || "Internal Server Error" });
+  } 
+});
+
+// HSD Fuel API
+const uploadHsd = multer();
+
+//Show Equipment Type
+router.get("/showEquipmentType", async (req, res) => {
+  try {
+    const [results] = await primaryConnection.query("CALL balcorpdb.SP_MINES_EQUIPMENT_MASTER_SHOW()");
+    const rows = Array.isArray(results) && Array.isArray(results[0]) ? results[0] : results;
+    return res.json(rows);
+  } catch (err) {
+    console.error("Error in /showEquipmentType:", err);
+    return res.status(500).json({ error: err.message || "Internal Server Error" });
+  }
+});
+
+// INSERT / UPDATE HSD Fuel Issued
+router.post("/hsd-fuel-issued", uploadHsd.none(), async (req, res) => {
+  try {
+    const { Prod_Date,Shift,Equipment_Type,Make_Model,Fuel_Tank_Capacity,Average_Daily_Consumption,Fuel_Issued_Location,Operator_Driver_Name,HSD_Issued,Issued_By,Received_By,Remarks,UserId} = req.body;
+
+    const [existing] = await primaryConnection.query(
+      `SELECT * FROM balcorpdb.mines_hsd_fuel_issued
+       WHERE Prod_Date = ? AND Shift = ?`,
+      [Prod_Date, Shift]
+    );
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_HSD_FUEL_ISSUED_INSERT_UPDATE(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [Prod_Date,Shift,Equipment_Type, Make_Model,Fuel_Tank_Capacity,Average_Daily_Consumption,Fuel_Issued_Location,Operator_Driver_Name,HSD_Issued,Issued_By,Received_By,Remarks,UserId]
+    );
+
+    res.status(200).json({
+      status: "success",
+      message: existing.length > 0
+        ? "Record updated successfully!"
+        : "Record inserted successfully!",
+      data: results[0],
+    });
+
+  } catch (err) {
+    console.error("Server error (HSD Fuel Issued Insert/Update):", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET: Fetch all HSD Fuel Issued Records
+router.get("/hsd-fuel-issued/show", async (req, res) => {
+  try {
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_HSD_FUEL_ISSUED_GET()"
+    );
+
+    const rows = Array.isArray(results) && Array.isArray(results[0])
+      ? results[0]
+      : results;
+
+    return res.json(rows);
+
+  } catch (err) {
+    console.error("Error fetching HSD Fuel Issued records:", err);
+    return res.status(500).json({ error: err.message || "Internal Server Error" });
+  }
+});
 
 // Submit HR Dashboard Form
 const uploadHR = multer();
