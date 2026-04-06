@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require('cors');
 const bodyParser = require("body-parser");
 const userRoutes = require("./routes/users");
-
+const minesDewateringRoutes = require("./routes/dewatering");
 const app = express();
 
 app.use(express.json()); 
@@ -21,7 +21,7 @@ app.use(bodyParser.json());
 
 // Routes
 app.use("/api/users", userRoutes);
-
+app.use("/api/mines-dewatering", minesDewateringRoutes);
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
