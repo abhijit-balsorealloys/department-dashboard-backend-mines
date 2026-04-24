@@ -54,6 +54,7 @@ async function checkPassword(userid, inputPassword) {
 router.post("/adminlogin", async (req, res) => {
   try {
     const { userid, password } = req.body;
+
     if (!userid || !password) {
       return res.status(400).json({ error: "userid and password are required!" });
     }
@@ -65,32 +66,61 @@ router.post("/adminlogin", async (req, res) => {
 
     const inputHash = hashPassword(password);
 
-    // Use dbQuery helper for consistent result-shape handling
-    const procRows = await dbQuery("CALL balcorpdb.SP_MINES_VALIDATE_USER(?, ?)", [userid, inputHash]);
+    // Step 1: Validate user using procedure
+    const procRows = await dbQuery(
+      "CALL balcorpdb.SP_MINES_VALIDATE_USER(?, ?)",
+      [userid, inputHash]
+    );
 
-    // procRows should be an array of row objects if the proc returns rows
-    const userRow = Array.isArray(procRows) && procRows.length > 0 ? procRows[0] : null;
+    const userRow =
+      Array.isArray(procRows) && procRows.length > 0
+        ? procRows[0]
+        : null;
 
     if (!userRow) {
       return res.status(404).json({ error: "User data not found" });
     }
 
-    // If stored user field is USER_PWD remove it before sending response
-    if (userRow.USER_PWD) {
-      delete userRow.USER_PWD;
-    }
-    // also remove common alternative property name if present
-    if (userRow.password) {
-      delete userRow.password;
+    // Step 2: Call login audit procedure
+    try {
+      await dbQuery(
+        "CALL balcorpdb.SP_MINES_LOGIN_AUDIT(?, ?, ?, ?, ?)",
+        [
+          userRow.EMPID,
+          userRow.EMPNAME,
+          userRow.EMPDESG || "",   // ensure fields exist
+          userRow.EMPDEPT || "",
+          userRow.USER_TYPE || ""
+        ]
+      );
+    } catch (auditErr) {
+      console.error("Audit log failed:", auditErr);
+      // Don't block login if audit fails
     }
 
+    // Step 3: Remove sensitive fields
+    delete userRow.USER_PWD;
+    delete userRow.password;
+
     return res.json({ user: userRow });
+
   } catch (err) {
     console.error("Error in /adminlogin:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
-
+// Show Login Wise Wise Data
+router.get("/showLoginAudit", async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const [results] = await primaryConnection.query("CALL balcorpdb.SP_MINES_LOGIN_AUDIT_GET(?, ?)", [from, to]);
+    const rows = Array.isArray(results) && Array.isArray(results[0]) ? results[0] : results;
+    return res.json(rows);
+  } catch (err) {
+    console.error("Error in /showLoginAudit:", err);
+    return res.status(500).json({ error: err.message || "Internal Server Error" });
+  }
+});
 
 // Show All Location Wise Data
 router.get("/showLocation", async (req, res) => {
@@ -882,8 +912,9 @@ router.post("/get-kpiEnvironment", async (req, res) => {
     res.status(500).json({ error: "Unable to fetch KPI Datas" });
   }
 });
+// API to Insert Update Tyre Mounted Condition
 router.post("/handover/", async (req, res) => {
-
+const p_id = req.body.id ? parseInt(req.body.id) : null;
   const {
     Prod_date, Shift, equipmentType,
     vehicleType, vehicleNo, department,
@@ -935,58 +966,59 @@ router.post("/handover/", async (req, res) => {
 
   // ── 72 params matching SP exactly ──────────────────────────────────────
   const params = [
-    c(Prod_date),         // 01 p_Prod_date
-    c(Shift),             // 02 p_Shift
-    Loc_Id,               // 03 p_Loc_Id          (INT)
-    c(equipmentType),     // 04 p_equipmentType    ← was missing before!
-    c(vehicleType),       // 05 p_vehicleType
-    c(vehicleNo),         // 06 p_vehicleNo
-    c(department),        // 07 p_department
-    c(hmrStart),          // 08 p_hmrStart
-    c(hmrEnd),            // 09 p_hmrEnd
-    c(handoverName),      // 10 p_handoverName
-    c(handoverEmpId),     // 11 p_handoverEmpId
-    c(takeoverName),      // 12 p_takeoverName
-    c(takeoverEmpId),     // 13 p_takeoverEmpId
+  p_id,                  // ✅ NEW PARAM (1)
 
-    // Checklist — 28 items × 2 = 56 params (14–69)
-    c(visualInspectionStatus),      c(visualInspectionRemarks),      // 14-15
-    c(engineConditionStatus),       c(engineConditionRemarks),        // 16-17
-    c(engineOilLevelStatus),        c(engineOilLevelRemarks),         // 18-19
-    c(coolantLevelStatus),          c(coolantLevelRemarks),           // 20-21
-    c(hydraulicOilStatus),          c(hydraulicOilRemarks),           // 22-23
-    c(transmissionOilStatus),       c(transmissionOilRemarks),        // 24-25
-    c(fuelLevelStatus),             c(fuelLevelRemarks),              // 26-27
-    c(batteryConditionStatus),      c(batteryConditionRemarks),       // 28-29
-    c(tyresConditionStatus),        c(tyresConditionRemarks),         // 30-31
-    c(tyrePressureStatus),          c(tyrePressureRemarks),           // 32-33
-    c(brakesConditionStatus),       c(brakesConditionRemarks),        // 34-35
-    c(steeringConditionStatus),     c(steeringConditionRemarks),      // 36-37
-    c(seatBeltConditionStatus),     c(seatBeltConditionRemarks),      // 38-39
-    c(lightsConditionStatus),       c(lightsConditionRemarks),        // 40-41
-    c(hornConditionStatus),         c(hornConditionRemarks),          // 42-43
-    c(ACconditionStatus),           c(ACconditionRemarks),            // 44-45
-    c(doorConditionStatus),         c(doorConditionRemarks),          // 46-47
-    c(indicatorsConditionStatus),   c(indicatorsConditionRemarks),    // 48-49
-    c(reverseAlarmConditionStatus), c(reverseAlarmConditionRemarks),  // 50-51
-    c(wipersConditionStatus),       c(wipersConditionRemarks),        // 52-53
-    c(mirrorsConditionStatus),      c(mirrorsConditionRemarks),       // 54-55
-    c(windshieldConditionStatus),   c(windshieldConditionRemarks),    // 56-57
-    c(safetyGuardsStatus),          c(safetyGuardsRemarks),           // 58-59
-    c(fireExtinguisherStatus),      c(fireExtinguisherRemarks),       // 60-61
-    c(firstAidKitStatus),           c(firstAidKitRemarks),            // 62-63
-    c(trailTestRunStatus),          c(trailTestRunRemarks),           // 64-65
-    c(leakageStatus),               c(leakageRemarks),                // 66-67
-    c(unusualNoiseStatus),          c(unusualNoiseRemarks),           // 68-69
+  c(Prod_date),          // 02
+  c(Shift),              // 03
+  Loc_Id,                // 04
+  c(equipmentType),      // 05
+  c(vehicleType),        // 06
+  c(vehicleNo),          // 07
+  c(department),         // 08
+  c(hmrStart),           // 09
+  c(hmrEnd),             // 10
+  c(handoverName),       // 11
+  c(handoverEmpId),      // 12
+  c(takeoverName),       // 13
+  c(takeoverEmpId),      // 14
 
-    // Footer
-    c(overallCondition),  // 70 p_overallCondition
-    c(observation),       // 71 p_observation
-    USERID,               // 72 p_USERID           (INT)
-  ];
+  // checklist continues same...
+  c(visualInspectionStatus), c(visualInspectionRemarks),
+  c(engineConditionStatus),  c(engineConditionRemarks),
+  c(engineOilLevelStatus),   c(engineOilLevelRemarks),
+  c(coolantLevelStatus),     c(coolantLevelRemarks),
+  c(hydraulicOilStatus),     c(hydraulicOilRemarks),
+  c(transmissionOilStatus),  c(transmissionOilRemarks),
+  c(fuelLevelStatus),        c(fuelLevelRemarks),
+  c(batteryConditionStatus), c(batteryConditionRemarks),
+  c(tyresConditionStatus),   c(tyresConditionRemarks),
+  c(tyrePressureStatus),     c(tyrePressureRemarks),
+  c(brakesConditionStatus),  c(brakesConditionRemarks),
+  c(steeringConditionStatus),c(steeringConditionRemarks),
+  c(seatBeltConditionStatus),c(seatBeltConditionRemarks),
+  c(lightsConditionStatus),  c(lightsConditionRemarks),
+  c(hornConditionStatus),    c(hornConditionRemarks),
+  c(ACconditionStatus),      c(ACconditionRemarks),
+  c(doorConditionStatus),    c(doorConditionRemarks),
+  c(indicatorsConditionStatus), c(indicatorsConditionRemarks),
+  c(reverseAlarmConditionStatus), c(reverseAlarmConditionRemarks),
+  c(wipersConditionStatus),  c(wipersConditionRemarks),
+  c(mirrorsConditionStatus), c(mirrorsConditionRemarks),
+  c(windshieldConditionStatus), c(windshieldConditionRemarks),
+  c(safetyGuardsStatus),     c(safetyGuardsRemarks),
+  c(fireExtinguisherStatus), c(fireExtinguisherRemarks),
+  c(firstAidKitStatus),      c(firstAidKitRemarks),
+  c(trailTestRunStatus),     c(trailTestRunRemarks),
+  c(leakageStatus),          c(leakageRemarks),
+  c(unusualNoiseStatus),     c(unusualNoiseRemarks),
+
+  c(overallCondition),
+  c(observation),
+  USERID
+];
 
   // Guard — fail fast if count drifts
-  if (params.length !== 72) {
+  if (params.length !== 73) {
     console.error(`❌ Param count mismatch! Expected 72, got ${params.length}`);
     return res.status(500).json({ error: `Param count mismatch: expected 72, got ${params.length}` });
   }
@@ -995,7 +1027,7 @@ router.post("/handover/", async (req, res) => {
 
   try {
     primaryConnection.query(
-      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_INSERT_UPDATE(${placeholders})`,
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_TYRE_INSERT_UPDATE(${placeholders})`,
       params,
       (err, results) => {
         if (err) {
@@ -1013,6 +1045,154 @@ router.post("/handover/", async (req, res) => {
 router.get("/showHandover", async (req, res) => {
   try {
     const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_GET()");
+
+    // MySQL returns nested array
+    res.json(rows[0]); // ✅ IMPORTANT
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+});
+// API to Insert Update Chain Mounted Condition
+router.post("/handoverChain/", async (req, res) => {
+  const p_id = req.body.id ? parseInt(req.body.id) : null;
+
+  const {
+    Prod_date, Shift, equipmentType,
+    vehicleType, vehicleNo, department,
+    hmrStart, hmrEnd,
+    handoverName, handoverEmpId,
+    takeoverName, takeoverEmpId,
+
+    visualInspectionStatus,      visualInspectionRemarks,
+    engineConditionStatus,       engineConditionRemarks,
+    engineOilLevelStatus,        engineOilLevelRemarks,
+    coolantLevelStatus,          coolantLevelRemarks,
+    hydraulicOilStatus,          hydraulicOilRemarks,
+    transmissionOilStatus,       transmissionOilRemarks,
+    fuelLevelStatus,             fuelLevelRemarks,
+    batteryConditionStatus,      batteryConditionRemarks,
+
+    // ✅ CHAIN FIELDS
+    trackChainConditionStatus,   trackChainConditionRemarks,
+    boomConditionStatus,         boomConditionRemarks,
+    armConditionStatus,          armConditionRemarks,
+    bucketConditionStatus,       bucketConditionRemarks,
+
+    seatBeltConditionStatus,     seatBeltConditionRemarks,
+    lightsConditionStatus,       lightsConditionRemarks,
+    hornConditionStatus,         hornConditionRemarks,
+    ACconditionStatus,           ACconditionRemarks,
+    doorConditionStatus,         doorConditionRemarks,
+    indicatorsConditionStatus,   indicatorsConditionRemarks,
+    reverseAlarmConditionStatus, reverseAlarmConditionRemarks,
+    wipersConditionStatus,       wipersConditionRemarks,
+    mirrorsConditionStatus,      mirrorsConditionRemarks,
+    windshieldConditionStatus,   windshieldConditionRemarks,
+    safetyGuardsStatus,          safetyGuardsRemarks,
+    fireExtinguisherStatus,      fireExtinguisherRemarks,
+    firstAidKitStatus,           firstAidKitRemarks,
+    trailTestRunStatus,          trailTestRunRemarks,
+    leakageStatus,               leakageRemarks,
+    unusualNoiseStatus,          unusualNoiseRemarks,
+
+    overallCondition, observation,
+  } = req.body;
+
+  const Loc_Id = req.body.Loc_Id ? parseInt(req.body.Loc_Id) : null;
+  if (!Loc_Id) {
+    return res.status(400).json({ error: "Location is required." });
+  }
+
+  const c    = (v) => (v === "" || v === undefined) ? null : v;
+  const cInt = (v) => (v === "" || v === undefined || v === null) ? null : parseInt(v);
+
+  const USERID = cInt(req.body.USERID) || 1;
+
+  const params = [
+    p_id,
+
+    c(Prod_date),
+    c(Shift),
+    Loc_Id,
+    c(equipmentType),
+    c(vehicleType),
+    c(vehicleNo),
+    c(department),
+    c(hmrStart),
+    c(hmrEnd),
+    c(handoverName),
+    c(handoverEmpId),
+    c(takeoverName),
+    c(takeoverEmpId),
+
+    // checklist
+    c(visualInspectionStatus), c(visualInspectionRemarks),
+    c(engineConditionStatus),  c(engineConditionRemarks),
+    c(engineOilLevelStatus),   c(engineOilLevelRemarks),
+    c(coolantLevelStatus),     c(coolantLevelRemarks),
+    c(hydraulicOilStatus),     c(hydraulicOilRemarks),
+    c(transmissionOilStatus),  c(transmissionOilRemarks),
+    c(fuelLevelStatus),        c(fuelLevelRemarks),
+    c(batteryConditionStatus), c(batteryConditionRemarks),
+
+    // ✅ CHAIN REPLACEMENT
+    c(trackChainConditionStatus), c(trackChainConditionRemarks),
+    c(boomConditionStatus),       c(boomConditionRemarks),
+    c(armConditionStatus),        c(armConditionRemarks),
+    c(bucketConditionStatus),     c(bucketConditionRemarks),
+
+    // remaining
+    c(seatBeltConditionStatus),c(seatBeltConditionRemarks),
+    c(lightsConditionStatus),  c(lightsConditionRemarks),
+    c(hornConditionStatus),    c(hornConditionRemarks),
+    c(ACconditionStatus),      c(ACconditionRemarks),
+    c(doorConditionStatus),    c(doorConditionRemarks),
+    c(indicatorsConditionStatus), c(indicatorsConditionRemarks),
+    c(reverseAlarmConditionStatus), c(reverseAlarmConditionRemarks),
+    c(wipersConditionStatus),  c(wipersConditionRemarks),
+    c(mirrorsConditionStatus), c(mirrorsConditionRemarks),
+    c(windshieldConditionStatus), c(windshieldConditionRemarks),
+    c(safetyGuardsStatus),     c(safetyGuardsRemarks),
+    c(fireExtinguisherStatus), c(fireExtinguisherRemarks),
+    c(firstAidKitStatus),      c(firstAidKitRemarks),
+    c(trailTestRunStatus),     c(trailTestRunRemarks),
+    c(leakageStatus),          c(leakageRemarks),
+    c(unusualNoiseStatus),     c(unusualNoiseRemarks),
+
+    c(overallCondition),
+    c(observation),
+    USERID
+  ];
+
+  // ✅ COUNT CHECK (IMPORTANT)
+  if (params.length !== 73) {
+    console.error(`❌ Param count mismatch! Got ${params.length}`);
+    return res.status(500).json({ error: "Param count mismatch" });
+  }
+
+  const placeholders = params.map(() => "?").join(", ");
+
+  try {
+    primaryConnection.query(
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_CHAIN_INSERT_UPDATE(${placeholders})`,
+      params,
+      (err, results) => {
+        if (err) {
+          console.error("❌ HandoverChain SP error:", err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        res.status(200).json({ message: "Submitted successfully!" });
+      }
+    );
+  } catch (err) {
+    console.error("❌ Server error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+router.get("/showHandoverChain", async (req, res) => {
+  try {
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_CHAIN_GET()");
 
     // MySQL returns nested array
     res.json(rows[0]); // ✅ IMPORTANT
@@ -1143,10 +1323,20 @@ router.post("/electricalHandover/", async (req, res) => {
     // ================= CHECKLIST KEYS =================
     const checklistKeys = [
 
-      // AIR CONDITIONER
-      ...Array.from({ length: 55 }, (_, i) => `airConditioner${i + 1}`),
+      // AC 1–45
+      ...Array.from({ length: 45 }, (_, i) => `airConditioner${i + 1}`),
 
-      // CHARGING MACHINE
+      // SPECIAL
+      "cobOffice",
+      "cobControlRoom",
+      "cobControlRoom2",
+      "cobPanelRoom",
+      "cobPanelRoom2",
+
+      // AC 46–55
+      ...Array.from({ length: 10 }, (_, i) => `airConditioner${i + 46}`),
+
+      // CHARGING
       "evChargingMachine1","evChargingMachine2","evChargingMachine3","evChargingMachine4",
 
       // DG
@@ -1175,15 +1365,289 @@ router.post("/electricalHandover/", async (req, res) => {
       // UPS
       "ups3kva","ups3kva2","ups3kva3","ups3kva4","ups3kva5",
 
-      // WATER COOLER
+      // WATER
       "waterCoolerCanteen","waterCoolerStaffMess","waterCoolerDieselDispensing",
-      "waterCoolerViewPoint","waterCoolerGarage",
+      "waterCoolerViewPoint","waterCoolerGarage","waterCoolerElectricalDbRoom",
 
-      // TREE CUTTER
+      // TREE
       "treeGrassCutter",
 
       // VCB
       "vcbOutdoor33kv","vcbOutdoor33kv2",
+    ];
+
+    // ================= BUILD PARAMS =================
+    const checklistParams = [];
+
+    checklistKeys.forEach((key) => {
+      checklistParams.push(
+        c(data[`${key}Status`]),
+        c(data[`${key}Remarks`])
+      );
+    });
+
+    const params = [
+      ...baseParams,
+      ...checklistParams,
+      USERID
+    ];
+
+    const expected = 6 + (checklistKeys.length * 2) + 1;
+
+    if (params.length !== expected) {
+      console.error(`❌ Param mismatch: expected ${expected}, got ${params.length}`);
+      return res.status(500).json({
+        error: `Param mismatch: expected ${expected}, got ${params.length}`
+      });
+    }
+
+    // ================= DEBUG =================
+    console.log("👉 Total Params:", params.length);
+    console.log("👉 Prod_date:", data.Prod_date, "Shift:", data.Shift);
+
+    // ================= CALL PROCEDURE =================
+    const placeholders = params.map(() => "?").join(",");
+
+    primaryConnection.query(
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_ELECTRICAL_INSERT_UPDATE(${placeholders})`,
+      params,
+      (err, results) => {
+        if (err) {
+          console.error("❌ Electrical SP error:", err);
+          return res.status(500).json({ error: err.message });
+        }
+
+        console.log("✅ SP Raw Result:", results);
+
+        return res.status(200).json({
+          message: "Electrical Handover Submitted successfully!",
+          debug: results
+        });
+      }
+    );
+
+  } catch (err) {
+    console.error("❌ Server error:", err);
+    return res.status(500).json({
+      error: "Internal server error",
+      details: err.message
+    });
+  }
+});
+router.get("/showElectricalHandover", async (req, res) => {
+  try {
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_ELECTRICAL_GET()");
+
+    res.json(rows[0]); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+});
+//get Daily Excavation Plans
+router.get("/showDailyExcavationPlan", async (req, res) => {
+  try {
+    
+    const { from, to } = req.query;
+
+    // Validate that both dates are provided
+    if (!from || !to) {
+      return res.status(400).json({ error: "Both 'from' and 'to' date parameters are required." });
+    }
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_DAILY_EXCAVATION_PLAN_REPORT_GET(?, ?)",
+      [from, to]
+    );
+
+    // MySQL stored procedures return results as results[0]
+    // which is the first result set (the SELECT rows)
+    const rows = Array.isArray(results[0]) ? results[0] : results;
+
+    res.json(rows);
+  } catch (err) {
+    console.error("showDailyExcavationPlan error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+//get Geology Face Sample Analysis Report 
+router.get("/showGeologyFaceSampleAnalysisReport", async (req, res) => {
+  try {
+    
+    const { from, to } = req.query;
+
+    // Validate that both dates are provided
+    if (!from || !to) {
+      return res.status(400).json({ error: "Both 'from' and 'to' date parameters are required." });
+    }
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_GEOLOGY_FACE_SAMPLING_ANALYSIS_REPORT_GET(?, ?)",
+      [from, to]
+    );
+
+    // MySQL stored procedures return results as results[0]
+    // which is the first result set (the SELECT rows)
+    const rows = Array.isArray(results[0]) ? results[0] : results;
+
+    res.json(rows);
+  } catch (err) {
+    console.error("showGeologyFaceSampleAnalysisReport error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+//get Daywise ROM Entry Report 
+router.get("/showDaywiseRomEntryReport", async (req, res) => {
+  try {
+    
+    const { from, to } = req.query;
+
+    // Validate that both dates are provided
+    if (!from || !to) {
+      return res.status(400).json({ error: "Both 'from' and 'to' date parameters are required." });
+    }
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_DAY_WISE_ROM_ENTRY_REPORT_GET(?, ?)",
+      [from, to]
+    );
+
+    // MySQL stored procedures return results as results[0]
+    // which is the first result set (the SELECT rows)
+    const rows = Array.isArray(results[0]) ? results[0] : results;
+
+    res.json(rows);
+  } catch (err) {
+    console.error("showDaywiseRomEntryReport error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+//get COBP Production Despatch Report
+router.get("/showCobProductionDespatch", async (req, res) => {
+  try {
+    
+    const { from, to } = req.query;
+
+    // Validate that both dates are provided
+    if (!from || !to) {
+      return res.status(400).json({ error: "Both 'from' and 'to' date parameters are required." });
+    }
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_COB_PRODUCTION_DESPATCH_REPORT_GET(?, ?)",
+      [from, to]
+    );
+
+    // MySQL stored procedures return results as results[0]
+    // which is the first result set (the SELECT rows)
+    const rows = Array.isArray(results[0]) ? results[0] : results;
+
+    res.json(rows);
+  } catch (err) {
+    console.error("showCobProductionDespatch error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+//get COBP Sample Analysis Report
+router.get("/showCobpSampleAnalysis", async (req, res) => {
+  try {
+    
+    const { from, to } = req.query;
+
+    // Validate that both dates are provided
+    if (!from || !to) {
+      return res.status(400).json({ error: "Both 'from' and 'to' date parameters are required." });
+    }
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_COBP_SAMPLE_ANALYSIS_REPORT_GET(?, ?)",
+      [from, to]
+    );
+
+    // MySQL stored procedures return results as results[0]
+    // which is the first result set (the SELECT rows)
+    const rows = Array.isArray(results[0]) ? results[0] : results;
+
+    res.json(rows);
+  } catch (err) {
+    console.error("showCobpSampleAnalysis error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+//get Production Analysis
+router.get("/showProductionAnalysis", async (req, res) => {
+  try {
+    
+    const { from, to } = req.query;
+
+    // Validate that both dates are provided
+    if (!from || !to) {
+      return res.status(400).json({ error: "Both 'from' and 'to' date parameters are required." });
+    }
+
+    const [results] = await primaryConnection.query(
+      "CALL balcorpdb.SP_MINES_TIPPER_MANAGEMENT_REPORT_GET(?, ?)",
+      [from, to]
+    );
+
+    // MySQL stored procedures return results as results[0]
+    // which is the first result set (the SELECT rows)
+    const rows = Array.isArray(results[0]) ? results[0] : results;
+
+    res.json(rows);
+  } catch (err) {
+    console.error("showProductionAnalysis error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+router.post("/etpHandover/", async (req, res) => {
+  try {
+    const data = req.body;
+
+    const c = (v) => (v === "" || v === undefined) ? null : v;
+    const USERID = data.USERID ? parseInt(data.USERID) : 1;
+
+    // ================= BASIC =================
+    const baseParams = [
+      c(data.Prod_date),
+      c(data.Shift),
+      c(data.handoverShiftIC),
+      c(data.handoverEmpId),
+      c(data.takeoverShiftIC),
+      c(data.takeoverEmpId),
+    ];
+
+    // ================= CHECKLIST KEYS =================
+    const checklistKeys = [
+
+      // ETP
+      "filterPress",
+      "airCompressor1",
+      "airCompressor2",
+      "flashMixer",
+      "polyelectrolyteDosingPump1",
+      "polyelectrolyteDosingPump2",
+      "naohDosingPump1",
+      "naohDosingPump2",
+      "feso4DosingPump1",
+      "feso4DosingPump2",
+      "feso4DosingMixer1",
+      "feso4DosingMixer2",
+      "naohDosingMixer",
+      "polyelectrolyteDosingMixer",
+      "flocculator1",
+      "flocculator2",
+      "railBridge",
+      "feedPump1",
+      "feedPump2",
+      "feedPump3",
+      "feedPump4",
+      "multigradePressureSandFilter",
+      "sludgeFeedPump1",
+      "sludgeFeedPump2",
+      "filterPressPowerPack",
+      "etpPump",
+      "submersibleSlurryPump10hp",
     ];
 
     // ================= BUILD CHECKLIST PARAMS =================
@@ -1215,14 +1679,14 @@ router.post("/electricalHandover/", async (req, res) => {
     const placeholders = params.map(() => "?").join(", ");
 
     primaryConnection.query(
-      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_ELECTRICAL_INSERT_UPDATE(${placeholders})`,
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_ETP_INSERT_UPDATE(${placeholders})`,
       params,
       (err, results) => {
         if (err) {
-          console.error("❌ Electrical SP error:", err.message);
+          console.error("❌ ETP SP error:", err.message);
           return res.status(500).json({ error: err.message });
         }
-        res.status(200).json({ message: "Electrical Handover Submitted successfully!" });
+        res.status(200).json({ message: "ETP Handover Submitted successfully!" });
       }
     );
 
@@ -1231,9 +1695,456 @@ router.post("/electricalHandover/", async (req, res) => {
     res.status(500).json({ error: "Internal server error: " + err.message });
   }
 });
-router.get("/showElectricalHandover", async (req, res) => {
+router.get("/showEtpHandover", async (req, res) => {
   try {
-    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_ELECTRICAL_GET()");
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_ETP_GET()");
+
+    res.json(rows[0]); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+});
+router.post("/dewateringHandover/", async (req, res) => {
+  try {
+    const data = req.body;
+
+    const c = (v) => (v === "" || v === undefined) ? null : v;
+    const USERID = data.USERID ? parseInt(data.USERID) : 1;
+
+    // ================= BASIC =================
+    const baseParams = [
+      c(data.Prod_date),
+      c(data.Shift),
+      c(data.handoverShiftIC),
+      c(data.handoverEmpId),
+      c(data.takeoverShiftIC),
+      c(data.takeoverEmpId),
+    ];
+
+    // ================= CHECKLIST KEYS =================
+    const checklistKeys = [
+      "dewateringPump",
+      "slurryPump1",
+      "slurryPump2",
+      "slurryPump3",
+      "submSlurryPump20hp",
+      "dieselPump1",
+      "dieselPump2",
+      "slurryPump5",
+      "slurryPump6",
+      "eddyPump",                          // leading space stripped
+      "f50hpDewateringSubmersiblePump1",
+      "f50hpDewateringSubmersiblePump2",
+      "motorWithSct20058PumpSet",          // 450kw prefix dropped (starts with digit)
+    ];
+
+    // ================= BUILD CHECKLIST PARAMS =================
+    const checklistParams = [];
+
+    checklistKeys.forEach((key) => {
+      checklistParams.push(
+        c(data[`${key}Status`]),
+        c(data[`${key}Remarks`])
+      );
+    });
+
+    // ================= FINAL PARAMS =================
+    const params = [
+      ...baseParams,
+      ...checklistParams,
+      USERID
+    ];
+
+    const expected = 6 + (checklistKeys.length * 2) + 1;  // 6 + 26 + 1 = 33
+
+    if (params.length !== expected) {
+      console.error(`❌ Param mismatch: expected ${expected}, got ${params.length}`);
+      return res.status(500).json({
+        error: `Param mismatch: expected ${expected}, got ${params.length}`
+      });
+    }
+
+    const placeholders = params.map(() => "?").join(", ");
+
+    primaryConnection.query(
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_DEWATERING_INSERT_UPDATE(${placeholders})`,
+      params,
+      (err, results) => {
+        if (err) {
+          console.error("❌ Dewatering SP error:", err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        res.status(200).json({ message: "Dewatering Handover submitted successfully!" });
+      }
+    );
+
+  } catch (err) {
+    console.error("❌ Server error:", err.message);
+    res.status(500).json({ error: "Internal server error: " + err.message });
+  }
+});
+router.get("/showDewateringHandover", async (req, res) => {
+  try {
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_DEWATERING_GET()");
+
+    res.json(rows[0]); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+});
+router.post("/sukindaElectricalHandover/", async (req, res) => {
+  try {
+    const data = req.body;
+
+    const c = (v) => (v === "" || v === undefined) ? null : v;
+    const USERID = data.USERID ? parseInt(data.USERID) : 1;
+
+    // ================= BASIC =================
+    const baseParams = [
+      c(data.Prod_date),
+      c(data.Shift),
+      c(data.handoverShiftIC),
+      c(data.handoverEmpId),
+      c(data.takeoverShiftIC),
+      c(data.takeoverEmpId),
+    ];
+
+    // ================= CHECKLIST KEYS =================
+    const checklistKeys = [
+
+      // FURNACE
+      "furnaceTransformerSystem",
+      "controlDesk",
+      "mccPanel",
+      "electrodeManagement",
+      "furnaceBreakerPanel",
+      "furnaceBatteryBank",
+
+      // RAW MATERIAL HANDLING SYSTEM
+      "weighingSystem",
+
+      // GCP
+      "vfdForGcp",
+
+      // BQT PLANT
+      "beltWeighingSystem",
+      "pdbPanel",
+      "mccRmfsPanels",
+
+      // SWITCHYARD & MISC
+      "dgSet1",
+      "transformerPower25mva",
+      "switchYardPanels",
+      "transformerAuxiliary09mva",
+      "capacitorBank",
+      "switchYardEquipment",
+      "batteryBankQclab",
+      "batteryBank66kva",
+
+      // WEIGH BRIDGE
+      "weighBridge1",
+    ];
+
+    // ================= BUILD CHECKLIST PARAMS =================
+    const checklistParams = [];
+
+    checklistKeys.forEach((key) => {
+      checklistParams.push(
+        c(data[`${key}Status`]),
+        c(data[`${key}Remarks`])
+      );
+    });
+
+    // ================= FINAL PARAMS =================
+    const params = [
+      ...baseParams,
+      ...checklistParams,
+      USERID,
+    ];
+
+    const expected = 6 + (checklistKeys.length * 2) + 1;
+
+    if (params.length !== expected) {
+      console.error(`❌ Param mismatch: expected ${expected}, got ${params.length}`);
+      return res.status(500).json({
+        error: `Param mismatch: expected ${expected}, got ${params.length}`
+      });
+    }
+
+    const placeholders = params.map(() => "?").join(", ");
+
+    primaryConnection.query(
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_SUKINDA_ELECTRICAL_INSERT_UPDATE(${placeholders})`,
+      params,
+      (err, results) => {
+        if (err) {
+          console.error("❌ Sukinda Electrical SP error:", err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        res.status(200).json({ message: "Sukinda Electrical Handover submitted successfully!" });
+      }
+    );
+
+  } catch (err) {
+    console.error("❌ Server error:", err.message);
+    res.status(500).json({ error: "Internal server error: " + err.message });
+  }
+});
+router.get("/showSukindaElectricalHandover", async (req, res) => {
+  try {
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_SUKINDA_ELECTRICAL_GET()");
+
+    res.json(rows[0]); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+});
+router.post("/sukindaMechanicalHandover/", async (req, res) => {
+  try {
+    const data = req.body;
+
+    const c = (v) => (v === "" || v === undefined) ? null : v;
+    const USERID = data.USERID ? parseInt(data.USERID) : 1;
+
+    // ================= BASIC =================
+    const baseParams = [
+      c(data.Prod_date),
+      c(data.Shift),
+      c(data.handoverShiftIC),
+      c(data.handoverEmpId),
+      c(data.takeoverShiftIC),
+      c(data.takeoverEmpId),
+    ];
+
+    // ================= CHECKLIST KEYS =================
+    const checklistKeys = [
+
+      // FURNACE
+      "electrode1",
+      "electrode2",
+      "electrode3",
+      "furnaceHood",
+
+      // COOLING TOWER & PUMP HOUSE
+      "coolingTower1",
+      "coolingTower2",
+      "waterSoftener",
+      "dieselPump1",
+      "jockeyPump",
+      "fireHydrandPump1",
+      "prmingPump",
+      "auxiliaryPump",
+      "boreWellPump1",
+      "boreWellPump2",
+
+      // GCP
+      "idFan1",
+      "idFan2",
+      "fdCollerFan1To8",
+
+      // COMPRESSOR
+      "compressor1",
+      "compressor2",
+
+      // BQT PLANT
+      "molassesPump",
+      "foPump",
+      "pressHydraulicPowerPack",
+      "gcpForBqtPlant",
+
+      // BENDING MACHINE
+      "bendingMachine",
+    ];
+
+    // ================= BUILD CHECKLIST PARAMS =================
+    const checklistParams = [];
+
+    checklistKeys.forEach((key) => {
+      checklistParams.push(
+        c(data[`${key}Status`]),
+        c(data[`${key}Remarks`])
+      );
+    });
+
+    // ================= FINAL PARAMS =================
+    const params = [
+      ...baseParams,
+      ...checklistParams,
+      USERID,
+    ];
+
+    const expected = 6 + (checklistKeys.length * 2) + 1;
+
+    if (params.length !== expected) {
+      console.error(`❌ Param mismatch: expected ${expected}, got ${params.length}`);
+      return res.status(500).json({
+        error: `Param mismatch: expected ${expected}, got ${params.length}`
+      });
+    }
+
+    const placeholders = params.map(() => "?").join(", ");
+
+    primaryConnection.query(
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_SUKINDA_MECHANICAL_INSERT_UPDATE(${placeholders})`,
+      params,
+      (err, results) => {
+        if (err) {
+          console.error("❌ Sukinda Mechanical SP error:", err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        res.status(200).json({ message: "Sukinda Mechanical Handover submitted successfully!" });
+      }
+    );
+
+  } catch (err) {
+    console.error("❌ Server error:", err.message);
+    res.status(500).json({ error: "Internal server error: " + err.message });
+  }
+});
+router.get("/showSukindaMechanicalHandover", async (req, res) => {
+  try {
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_SUKINDA_MECHANICAL_GET()");
+
+    res.json(rows[0]); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+});
+router.post("/sukindaOperationHandover/", async (req, res) => {
+  try {
+    const data = req.body;
+
+    const c = (v) => (v === "" || v === undefined) ? null : v;
+    const USERID = data.USERID ? parseInt(data.USERID) : 1;
+
+    // ================= BASIC =================
+    const baseParams = [
+      c(data.Prod_date),
+      c(data.Shift),
+      c(data.handoverShiftIC),
+      c(data.handoverEmpId),
+      c(data.takeoverShiftIC),
+      c(data.takeoverEmpId),
+    ];
+
+    // ================= CHECKLIST KEYS =================
+    const checklistKeys = [
+
+      // FURNACE
+      "furnaceShell",
+      "electrode1",
+      "electrode2",
+      "electrode3",
+      "bottomCoolingBlower1",
+      "bottomCoolingBlower2",
+      "electrodeCoolingBlower1",
+      "electrodeCoolingBlower2",
+      "electrodeCoolingBlower3",
+      "furnaceChuteBlower1",
+      "furnaceChuteBlower2",
+      "furnaceChuteBlower3",
+      "furnaceChuteBlower4",
+      "furnaceChuteBlower5",
+      "furnaceChuteBlower6",
+      "stuffingBoxBlower1",
+      "stuffingBoxBlower2",
+      "hydraulicPowerPack",
+      "chargingChute1To6",
+
+      // RAW MATERIAL
+      "ugBunker",
+      "dayBinBunkers",
+      "skipHoist",
+      "weighingSystem",
+      "dischargeFeeder",
+      "conveyorBelts",
+      "vibratingScreen1",
+      "vibratingScreen2",
+      "telpherCar1",
+      "telpherCar2",
+      "telpherCar3",
+
+      // CRANE
+      "eotCrane2075T",
+      "eotCrane2510T",
+
+      // PUMP HOUSE
+      "pump1",
+      "pump2",
+
+      // FORKLIFT
+      "dieselForklift1",
+      "dieselForklift2",
+      "monoRailHoist1",
+      "monoRailHoist2",
+
+      // GCP
+      "idFan1",
+      "idFan2",
+      "fdCollerFan1To8",
+
+      // BQT PLANT
+      "dryer",
+      "press",
+      "uMixer",
+      "gcpForBqtPlant",
+
+      // JIG
+      "jigOperations",
+    ];
+
+    // ================= BUILD CHECKLIST PARAMS =================
+    const checklistParams = [];
+
+    checklistKeys.forEach((key) => {
+      checklistParams.push(
+        c(data[`${key}Status`]),
+        c(data[`${key}Remarks`])
+      );
+    });
+
+    // ================= FINAL PARAMS =================
+    const params = [
+      ...baseParams,
+      ...checklistParams,
+      USERID,
+    ];
+
+    const expected = 6 + (checklistKeys.length * 2) + 1;
+
+    if (params.length !== expected) {
+      console.error(`❌ Param mismatch: expected ${expected}, got ${params.length}`);
+      return res.status(500).json({
+        error: `Param mismatch: expected ${expected}, got ${params.length}`
+      });
+    }
+
+    const placeholders = params.map(() => "?").join(", ");
+
+    primaryConnection.query(
+      `CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_SUKINDA_OPERATION_INSERT_UPDATE(${placeholders})`,
+      params,
+      (err, results) => {
+        if (err) {
+          console.error("❌ Sukinda Operation SP error:", err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        res.status(200).json({ message: "Sukinda Operation Handover submitted successfully!" });
+      }
+    );
+
+  } catch (err) {
+    console.error("❌ Server error:", err.message);
+    res.status(500).json({ error: "Internal server error: " + err.message });
+  }
+});
+router.get("/showSukindaOperationHandover", async (req, res) => {
+  try {
+    const [rows] = await primaryConnection.query("CALL balcorpdb.SP_MINES_HANDOVER_TAKEOVER_SUKINDA_OPERATION_GET()");
 
     res.json(rows[0]); 
   } catch (err) {
